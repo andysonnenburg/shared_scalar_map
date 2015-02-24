@@ -167,7 +167,7 @@ private:
 };
 
 template <typename T>
-void swap(shared_ptr<T>& lhs, shared_ptr<T> rhs)
+void swap(shared_ptr<T>& lhs, shared_ptr<T>& rhs)
 {
 	lhs.swap(rhs);
 }
