@@ -323,25 +323,12 @@ struct branch : node<Key, T, Prefix, Mask>
   std::tuple<shared_ptr<node_type>, iterator, bool> insert(shared_ptr<node_type> const& ptr, value_type const& value)
   {
     if (not_mem_of(value.first, fPrefix, fMask)) {
-      auto leaf = make_shared<leaf_type>(value.first, value.second);
-      iterator i(&leaf->get());
-      auto branch = make_branch(value.first, shared_ptr<node_type>(std::move(leaf)), fPrefix, ptr);
-      return std::make_tuple(std::move(branch), i, true);
+      return insert_not_mem(ptr, value);
     }
     if (left(value.first, fMask)) {
-      shared_ptr<node_type> left;
-      iterator i;
-      bool inserted;
-      std::tie(left, i, inserted) = fLeft->insert(fLeft, value);
-      auto branch = make_shared<branch_type>(fPrefix, fMask, std::move(left), fRight);
-      return std::make_tuple(std::move(branch), i, inserted);
+      return insert_left(value);
     }
-    shared_ptr<node_type> right;
-    iterator i;
-    bool inserted;
-    std::tie(right, i, inserted) = fRight->insert(fRight, value);
-    auto branch = make_shared<branch_type>(fPrefix, fMask, fLeft, std::move(right));
-    return std::make_tuple(std::move(branch), i, inserted);
+    return insert_right(value);
   }
 
   iterator find(key_type const& key) override final
@@ -355,6 +342,37 @@ struct branch : node<Key, T, Prefix, Mask>
   }
 
 private:
+  std::tuple<shared_ptr<node_type>, iterator, bool>
+  insert_not_mem(shared_ptr<node_type> ptr, value_type const& value)
+  {
+    auto leaf = make_shared<leaf_type>(value.first, value.second);
+    iterator i(&leaf->get());
+    auto branch = make_branch(value.first, shared_ptr<node_type>(std::move(leaf)), fPrefix, std::move(ptr));
+    return std::make_tuple(std::move(branch), i, true);
+  }
+
+  std::tuple<shared_ptr<node_type>, iterator, bool>
+  insert_left(value_type const& value)
+  {
+    shared_ptr<node_type> left;
+    iterator i;
+    bool inserted;
+    std::tie(left, i, inserted) = fLeft->insert(fLeft, value);
+    auto branch = make_shared<branch_type>(fPrefix, fMask, std::move(left), fRight);
+    return std::make_tuple(std::move(branch), i, inserted);
+  }
+
+  std::tuple<shared_ptr<node_type>, iterator, bool>
+  insert_right(value_type const& value)
+  {
+    shared_ptr<node_type> right;
+    iterator i;
+    bool inserted;
+    std::tie(right, i, inserted) = fRight->insert(fRight, value);
+    auto branch = make_shared<branch_type>(fPrefix, fMask, fLeft, std::move(right));
+    return std::make_tuple(std::move(branch), i, inserted);
+  }
+
   template <typename This>
   struct find_result
     : std::conditional<pointer_is_const<This>::value,
