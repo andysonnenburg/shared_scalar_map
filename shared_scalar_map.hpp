@@ -248,7 +248,7 @@ private:
 };
 
 template <typename Key, typename Prefix, typename Mask>
-bool not_mem_of(Key const& key, Prefix const& prefix, Mask const& mask)
+bool not_mem(Key const& key, Prefix const& prefix, Mask const& mask)
 {
   return (key & (~(mask - 1) ^ mask)) != prefix;
 }
@@ -322,7 +322,7 @@ struct branch : node<Key, T, Prefix, Mask>
 
   std::tuple<shared_ptr<node_type>, iterator, bool> insert(shared_ptr<node_type> const& ptr, value_type const& value)
   {
-    if (not_mem_of(value.first, fPrefix, fMask)) {
+    if (not_mem(value.first, fPrefix, fMask)) {
       return insert_not_mem(ptr, value);
     }
     if (left(value.first, fMask)) {
@@ -383,7 +383,7 @@ private:
   template <typename This>
   static typename find_result<This>::type find_impl(This aThis, key_type const& aKey)
   {
-    if (not_mem_of(aKey, aThis->fPrefix, aThis->fMask)) {
+    if (not_mem(aKey, aThis->fPrefix, aThis->fMask)) {
       return typename find_result<This>::type();
     }
     if (left(aKey, aThis->fMask)) {
