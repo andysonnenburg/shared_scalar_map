@@ -22,4 +22,8 @@ int main()
 	std::cout << map.find(3)->second << std::endl;
 	auto map2 = map;
 	std::cout << map2.empty() << std::endl;
+	EML::shared_scalar_map<int*, int> map3;
+	int i = 0;
+	map3.insert(std::make_pair(&i, 0));
+	std::cout << map3.empty() << std::endl;
 }

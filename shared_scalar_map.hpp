@@ -1,7 +1,6 @@
 #ifndef _eml_general_shared_scalar_map_hpp
 #define _eml_general_shared_scalar_map_hpp
 
-#include <iostream>
 #include <stdexcept>
 #include <tuple>
 #include <type_traits>
@@ -250,13 +249,13 @@ private:
 template <typename Key, typename Prefix, typename Mask>
 bool not_mem(Key const& key, Prefix const& prefix, Mask const& mask)
 {
-  return (key & (~(mask - 1) ^ mask)) != prefix;
+  return (key & (~(mask - static_cast<Mask>(1)) ^ mask)) != prefix;
 }
 
 template <typename Prefix, typename Mask>
 bool left(Prefix const& key, Mask const& mask)
 {
-  return (key & mask) == 0;
+  return (key & mask) == static_cast<Prefix>(0);
 }
 
 template <typename, typename, typename, typename>
@@ -267,6 +266,40 @@ struct branch;
 
 template <typename, typename, typename, typename>
 struct leaf;
+
+template <typename Mask, typename Prefix>
+Mask make_mask(Prefix prefix1, Prefix prefix2)
+{
+  using std::log2;
+  return static_cast<Mask>(1) << static_cast<Mask>(log2(prefix1 ^ prefix2));
+}
+
+template <typename Prefix, typename Mask>
+Prefix make_prefix(Prefix prefix, Mask mask)
+{
+  return prefix & (~(mask - static_cast<Mask>(1)) ^ mask);
+}
+
+template <typename Prefix, typename Mask, typename Key, typename T>
+shared_ptr<branch<Key, T, Prefix, Mask>>
+make_branch(Prefix const& prefix1,
+            shared_ptr<node<Key, T, Prefix, Mask>> node1,
+            Prefix const& prefix2,
+            shared_ptr<node<Key, T, Prefix, Mask>> node2)
+{
+  auto mask = make_mask<Mask>(prefix1, prefix2);
+  auto prefix = make_prefix(prefix1, mask);
+  if (left<Prefix, Mask>(prefix1, mask)) {
+    return make_shared<branch<Key, T, Prefix, Mask>>(prefix,
+                                                     mask,
+                                                     std::move(node1),
+                                                     std::move(node2));
+  }
+  return make_shared<branch<Key, T, Prefix, Mask>>(prefix,
+                                                   mask,
+                                                   std::move(node2),
+                                                   std::move(node1));
+}
 
 template <
   typename Key,
@@ -325,7 +358,7 @@ struct branch : node<Key, T, Prefix, Mask>
     if (not_mem(value.first, fPrefix, fMask)) {
       return insert_not_mem(ptr, value);
     }
-    if (left(value.first, fMask)) {
+    if (left<Prefix, Mask>(value.first, fMask)) {
       return insert_left(value);
     }
     return insert_right(value);
@@ -347,7 +380,7 @@ private:
   {
     auto leaf = make_shared<leaf_type>(value.first, value.second);
     iterator i(&leaf->get());
-    auto branch = make_branch(value.first, shared_ptr<node_type>(std::move(leaf)), fPrefix, std::move(ptr));
+    auto branch = make_branch<Prefix>(value.first, shared_ptr<node_type>(std::move(leaf)), fPrefix, std::move(ptr));
     return std::make_tuple(std::move(branch), i, true);
   }
 
@@ -386,7 +419,7 @@ private:
     if (not_mem(aKey, aThis->fPrefix, aThis->fMask)) {
       return typename find_result<This>::type();
     }
-    if (left(aKey, aThis->fMask)) {
+    if (left<Prefix, Mask>(aKey, aThis->fMask)) {
       return aThis->fLeft->find(aKey);
     }
     return aThis->fRight->find(aKey);
@@ -426,7 +459,7 @@ struct leaf : node<Key, T, Prefix, Mask>
     }
     auto leaf = make_shared<leaf_type>(value.first, value.second);
     iterator i(&leaf->get());
-    auto branch = make_branch(value.first, shared_ptr<node_type>(std::move(leaf)), fValue.first, ptr);
+    auto branch = make_branch<Prefix>(value.first, shared_ptr<node_type>(std::move(leaf)), fValue.first, ptr);
     return std::make_tuple(std::move(branch), i, true);
   }
 
@@ -470,45 +503,107 @@ private:
   value_type fValue;
 };
 
-template <typename Mask, typename Prefix>
-Mask make_mask(Prefix prefix1, Prefix prefix2)
+struct ptr_prefix;
+
+struct ptr_mask;
+
+struct ptr_prefix
 {
-  using std::log2;
-  return 1 << static_cast<Mask>(log2(prefix1 ^ prefix2));
+	friend ptr_prefix operator&(ptr_prefix, ptr_mask);
+
+	template <typename T>
+	ptr_prefix(T* ptr)
+		: fValue(reinterpret_cast<std::uintptr_t>(ptr))
+	{}
+
+	template <typename T>
+	explicit ptr_prefix(T value)
+		: fValue(static_cast<std::uintptr_t>(value))
+	{}
+
+	friend ptr_prefix operator^(ptr_prefix lhs, ptr_prefix rhs)
+	{
+		return ptr_prefix(lhs.fValue ^ rhs.fValue);
+	}
+
+	friend bool operator==(ptr_prefix lhs, ptr_prefix rhs)
+	{
+		return lhs.fValue == rhs.fValue;
+	}
+
+	friend bool operator!=(ptr_prefix lhs, ptr_prefix rhs)
+	{
+		return lhs.fValue != rhs.fValue;
+	}
+
+	std::uintptr_t get() const
+	{
+		return fValue;
+	}
+
+private:
+	std::uintptr_t fValue;
+};
+
+inline auto log2(ptr_prefix prefix) -> decltype(std::log2(prefix.get()))
+{
+	return std::log2(prefix.get());
 }
 
-template <typename Prefix, typename Mask>
-Prefix make_prefix(Prefix prefix, Mask mask)
+struct ptr_mask
 {
-  return prefix & (~(mask - 1) ^ mask);
-}
+	friend ptr_prefix operator&(ptr_prefix, ptr_mask);
 
-template <typename Key, typename T, typename Prefix, typename Mask>
-shared_ptr<branch<Key, T, Prefix, Mask>>
-make_branch(Prefix const& prefix1,
-            shared_ptr<node<Key, T, Prefix, Mask>> node1,
-            Prefix const& prefix2,
-            shared_ptr<node<Key, T, Prefix, Mask>> node2)
+	template <typename T>
+	ptr_mask(T* ptr)
+		: fValue(reinterpret_cast<std::uintptr_t>(ptr))
+	{}
+
+	template <typename T>
+	explicit ptr_mask(T value)
+		: fValue(static_cast<std::uintptr_t>(value))
+	{}
+
+	friend ptr_mask operator<<(ptr_mask lhs, ptr_mask rhs)
+	{
+		return ptr_mask(lhs.fValue << rhs.fValue);
+	}
+
+	friend ptr_mask operator-(ptr_mask lhs, ptr_mask rhs)
+	{
+		return ptr_mask(lhs.fValue - rhs.fValue);
+	}
+
+	ptr_mask operator~() const
+	{
+		return ptr_mask(~fValue);
+	}
+
+	friend ptr_mask operator^(ptr_mask lhs, ptr_mask rhs)
+	{
+		return ptr_mask(lhs.fValue ^ rhs.fValue);
+	}
+
+private:
+	std::uintptr_t fValue;
+};
+
+inline ptr_prefix operator&(ptr_prefix lhs, ptr_mask rhs)
 {
-  auto mask = make_mask<Mask>(prefix1, prefix2);
-  auto prefix = make_prefix(prefix1, mask);
-  if (left(prefix1, mask)) {
-    return make_shared<branch<Key, T, Prefix, Mask>>(prefix,
-                                                     mask,
-                                                     std::move(node1),
-                                                     std::move(node2));
-  }
-  return make_shared<branch<Key, T, Prefix, Mask>>(prefix,
-                                                   mask,
-                                                   std::move(node2),
-                                                   std::move(node1));
+	return ptr_prefix(lhs.fValue & rhs.fValue);
 }
 
 template <
   typename Key,
   typename T,
-  typename Prefix = T,
-  typename Mask = T
+  typename Prefix = typename std::conditional<
+		std::is_pointer<Key>::value,
+		ptr_prefix,
+		Key>::type,
+  typename Mask = typename std::conditional<
+		std::is_pointer<Key>::value,
+		ptr_mask,
+		Key>::type
   >
 struct shared_scalar_map
 {
