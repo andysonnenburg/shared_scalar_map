@@ -205,13 +205,21 @@ shared_ptr<T> make_shared(Arg0&& arg0, Arg1&& arg1, Arg2&& arg2, Arg3&& arg3)
 
 
 template <typename ValueType>
-struct shared_scalar_map_iterator
+struct iterator
 {
-  shared_scalar_map_iterator()
+  template <typename>
+  friend struct iterator;
+
+  iterator()
     : fValue(nullptr)
   {}
 
-  explicit shared_scalar_map_iterator(ValueType* value)
+  template <typename OtherValueType>
+  iterator(iterator<OtherValueType> const& i)
+    : fValue(i.fValue)
+  {}
+
+  explicit iterator(ValueType* value)
     : fValue(value)
   {}
 
@@ -225,12 +233,12 @@ struct shared_scalar_map_iterator
     return fValue;
   }
 
-  friend bool operator==(shared_scalar_map_iterator const& lhs, shared_scalar_map_iterator const& rhs)
+  friend bool operator==(iterator const& lhs, iterator const& rhs)
   {
     return lhs.fValue == rhs.fValue;
   }
 
-  friend bool operator!=(shared_scalar_map_iterator const& lhs, shared_scalar_map_iterator const& rhs)
+  friend bool operator!=(iterator const& lhs, iterator const& rhs)
   {
     return lhs.fValue != rhs.fValue;
   }
@@ -274,14 +282,12 @@ struct node : control_block
   typedef Key key_type;
   typedef T mapped_type;
   typedef std::pair<key_type const, mapped_type> value_type;
-  typedef shared_scalar_map_iterator<value_type> iterator;
-  typedef shared_scalar_map_iterator<value_type const> const_iterator;
+  typedef shared_scalar_map_detail::iterator<value_type> iterator;
+  typedef shared_scalar_map_detail::iterator<value_type const> const_iterator;
   virtual ~node() {}
-  virtual std::tuple<shared_ptr<node>, iterator, bool> insert(shared_ptr<node>, value_type const&) = 0;
-  // virtual iterator find(Key const&) = 0;
-  // virtual const_iterator find(Key const&) const = 0;
-  virtual mapped_type& at(key_type const&) = 0;
-  virtual mapped_type const& at(key_type const&) const = 0;
+  virtual std::tuple<shared_ptr<node>, iterator, bool> insert(shared_ptr<node> const&, value_type const&) = 0;
+  virtual iterator find(Key const&) = 0;
+  virtual const_iterator find(Key const&) const = 0;
 };
 
 template <
@@ -299,6 +305,7 @@ struct branch : node<Key, T, Prefix, Mask>
   using typename node_type::mapped_type;
   using typename node_type::value_type;
   using typename node_type::iterator;
+  using typename node_type::const_iterator;
 
   template <
     typename OtherPrefix,
@@ -313,12 +320,12 @@ struct branch : node<Key, T, Prefix, Mask>
     , fRight(std::forward<OtherRight>(right))
   {}
 
-  std::tuple<shared_ptr<node_type>, iterator, bool> insert(shared_ptr<node_type> ptr, value_type const& value)
+  std::tuple<shared_ptr<node_type>, iterator, bool> insert(shared_ptr<node_type> const& ptr, value_type const& value)
   {
     if (not_mem_of(value.first, fPrefix, fMask)) {
       auto leaf = make_shared<leaf_type>(value.first, value.second);
       iterator i(&leaf->get());
-      auto branch = make_branch(value.first, shared_ptr<node_type>(std::move(leaf)), fPrefix, std::move(ptr));
+      auto branch = make_branch(value.first, shared_ptr<node_type>(std::move(leaf)), fPrefix, ptr);
       return std::make_tuple(std::move(branch), i, true);
     }
     if (left(value.first, fMask)) {
@@ -337,30 +344,34 @@ struct branch : node<Key, T, Prefix, Mask>
     return std::make_tuple(std::move(branch), i, inserted);
   }
 
-  mapped_type& at(key_type const& key) override final
+  iterator find(key_type const& key) override final
   {
-    return at_impl(this, key);
+    return find_impl(this, key);
   }
 
-  mapped_type const& at(key_type const& key) const override final
+  const_iterator find(key_type const& key) const override final
   {
-    return at_impl(this, key);
+    return find_impl(this, key);
   }
 
 private:
   template <typename This>
-  static typename std::conditional<
-    pointer_is_const<This>::value,
-    mapped_type const&,
-    mapped_type&>::type at_impl(This aThis, key_type const& aKey)
+  struct find_result
+    : std::conditional<pointer_is_const<This>::value,
+                       const_iterator,
+                       iterator>
+  {};
+
+  template <typename This>
+  static typename find_result<This>::type find_impl(This aThis, key_type const& aKey)
   {
     if (not_mem_of(aKey, aThis->fPrefix, aThis->fMask)) {
-      throw std::out_of_range("branch");
+      return typename find_result<This>::type();
     }
     if (left(aKey, aThis->fMask)) {
-      return aThis->fLeft->at(aKey);
+      return aThis->fLeft->find(aKey);
     }
-    return aThis->fRight->at(aKey);
+    return aThis->fRight->find(aKey);
   }
 
   Prefix fPrefix;
@@ -378,36 +389,37 @@ template <
 struct leaf : node<Key, T, Prefix, Mask>
 {
   typedef node<Key, T, Prefix, Mask> node_type;
+  using typename node_type::leaf_type;
   using typename node_type::key_type;
   using typename node_type::mapped_type;
   using typename node_type::value_type;
   using typename node_type::iterator;
-  using typename node_type::leaf_type;
+  using typename node_type::const_iterator;
 
   template <typename OtherKey, typename U>
   leaf(OtherKey&& key, U&& mapped)
     : fValue(std::forward<OtherKey>(key), std::forward<U>(mapped))
   {}
 
-  std::tuple<shared_ptr<node_type>, iterator, bool> insert(shared_ptr<node_type> ptr, value_type const& value)
+  std::tuple<shared_ptr<node_type>, iterator, bool> insert(shared_ptr<node_type> const& ptr, value_type const& value)
   {
     if (value.first == fValue.first) {
-      return std::make_tuple(std::move(ptr), iterator(&fValue), false);
+      return std::make_tuple(ptr, iterator(&fValue), false);
     }
     auto leaf = make_shared<leaf_type>(value.first, value.second);
     iterator i(&leaf->get());
-    auto branch = make_branch(value.first, shared_ptr<node_type>(std::move(leaf)), fValue.first, std::move(ptr));
+    auto branch = make_branch(value.first, shared_ptr<node_type>(std::move(leaf)), fValue.first, ptr);
     return std::make_tuple(std::move(branch), i, true);
   }
 
-  mapped_type& at(key_type const& key) override final
+  iterator find(key_type const& key) override final
   {
-    return at_impl(this, key);
+    return find_impl(this, key);
   }
 
-  mapped_type const& at(key_type const& key) const override final
+  const_iterator find(key_type const& key) const override final
   {
-    return at_impl(this, key);
+    return find_impl(this, key);
   }
 
   value_type& get()
@@ -422,15 +434,19 @@ struct leaf : node<Key, T, Prefix, Mask>
 
 private:
   template <typename This>
-  static typename std::conditional<
-    pointer_is_const<This>::value,
-    mapped_type const&,
-    mapped_type&>::type at_impl(This aThis, key_type const& aKey)
+  struct find_result
+    : std::conditional<pointer_is_const<This>::value,
+                       const_iterator,
+                       iterator>
+  {};
+
+  template <typename This>
+  static typename find_result<This>::type find_impl(This aThis, key_type const& aKey)
   {
     if (aKey != aThis->fValue.first) {
-      throw std::out_of_range("leaf");
+      return typename find_result<This>::type();
     }
-    return aThis->fValue.second;
+    return typename find_result<This>::type(&aThis->fValue);
   }
 
   value_type fValue;
@@ -507,14 +523,14 @@ public:
     return std::make_pair(i, true);
   }
 
-  mapped_type& at(key_type const& key)
+  iterator find(key_type const& key)
   {
-    return at_impl(this, key);
+    return find_impl(this, key);
   }
 
-  mapped_type const& at(key_type const& key) const
+  const_iterator find(key_type const& key) const
   {
-    return at_impl(this, key);
+    return find_impl(this, key);
   }
 
   iterator end()
@@ -544,15 +560,19 @@ public:
 
 private:
   template <typename This>
-  static typename std::conditional<
-    pointer_is_const<This>::value,
-    T const&,
-    T&>::type at_impl(This aThis, key_type const& aKey)
+  struct find_result
+    : std::conditional<pointer_is_const<This>::value,
+                       const_iterator,
+                       iterator>
+  {};
+
+  template <typename This>
+  static typename find_result<This>::type find_impl(This aThis, key_type const& aKey)
   {
     if (aThis->fNode) {
-      return aThis->fNode->at(aKey);
+      return aThis->fNode->find(aKey);
     }
-    throw std::out_of_range("shared_scalar_map");
+    return aThis->end();
   }
 
   shared_ptr<node_type> fNode;
