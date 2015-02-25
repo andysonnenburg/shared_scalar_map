@@ -1,10 +1,13 @@
 #ifndef _eml_general_shared_scalar_map_hpp
 #define _eml_general_shared_scalar_map_hpp
 
+#include <iostream>
 #include <stdexcept>
 #include <tuple>
 #include <type_traits>
 #include <utility>
+
+#include <cmath>
 
 namespace EML
 {
@@ -179,7 +182,9 @@ template <
 	>
 shared_ptr<T> make_shared(Arg0&& arg0, Arg1&& arg1)
 {
-	return shared_ptr<T>(make_arg, std::forward<Arg0>(arg0), std::forward<Arg1>(arg1));
+	return shared_ptr<T>(make_arg,
+											 std::forward<Arg0>(arg0),
+											 std::forward<Arg1>(arg1));
 }
 
 template <
@@ -234,6 +239,18 @@ private:
 	ValueType* fValue;
 };
 
+template <typename Key, typename Prefix, typename Mask>
+bool not_mem_of(Key const& key, Prefix const& prefix, Mask const& mask)
+{
+	return (key & (~(mask - 1) ^ mask)) != prefix;
+}
+
+template <typename Prefix, typename Mask>
+bool left(Prefix const& key, Mask const& mask)
+{
+	return (key & mask) == 0;
+}
+
 template <typename, typename, typename, typename>
 struct node;
 
@@ -251,6 +268,9 @@ template <
 	>
 struct node : control_block
 {
+	typedef node node_type;
+	typedef branch<Key, T, Prefix, Mask> branch_type;
+	typedef leaf<Key, T, Prefix, Mask> leaf_type;
 	typedef Key key_type;
 	typedef T mapped_type;
 	typedef std::pair<key_type const, mapped_type> value_type;
@@ -273,12 +293,12 @@ template <
 struct branch : node<Key, T, Prefix, Mask>
 {
 	typedef node<Key, T, Prefix, Mask> node_type;
+	using typename node_type::branch_type;
+	using typename node_type::leaf_type;
 	using typename node_type::key_type;
 	using typename node_type::mapped_type;
 	using typename node_type::value_type;
 	using typename node_type::iterator;
-	typedef branch<Key, T, Prefix, Mask> branch_type;
-	typedef leaf<Key, T, Prefix, Mask> leaf_type;
 
 	template <
 		typename OtherPrefix,
@@ -295,13 +315,13 @@ struct branch : node<Key, T, Prefix, Mask>
 
 	std::tuple<shared_ptr<node_type>, iterator, bool> insert(shared_ptr<node_type> ptr, value_type const& value)
 	{
-		if (!mem_of(value.first, this)) {
+		if (not_mem_of(value.first, fPrefix, fMask)) {
 			auto leaf = make_shared<leaf_type>(value.first, value.second);
 			iterator i(&leaf->get());
 			auto branch = make_branch(value.first, shared_ptr<node_type>(std::move(leaf)), fPrefix, std::move(ptr));
 			return std::make_tuple(std::move(branch), i, true);
 		}
-		if (left(value.first, this)) {
+		if (left(value.first, fMask)) {
 			shared_ptr<node_type> left;
 			iterator i;
 			bool inserted;
@@ -328,26 +348,16 @@ struct branch : node<Key, T, Prefix, Mask>
 	}
 
 private:
-	static bool mem_of(key_type const& aKey, branch const* aThis)
-	{
-		return (aKey & (~(aThis->fMask - 1) ^ aThis->fMask)) == aThis->fPrefix;
-	}
-
-	static bool left(key_type const& aKey, branch const* aThis)
-	{
-		return (aKey & aThis->fMask) == 0;
-	}
-
 	template <typename This>
 	static typename std::conditional<
 		pointer_is_const<This>::value,
 		mapped_type const&,
 		mapped_type&>::type at_impl(This aThis, key_type const& aKey)
 	{
-		if (!mem_of(aKey, aThis)) {
+		if (not_mem_of(aKey, aThis->fPrefix, aThis->fMask)) {
 			throw std::out_of_range("branch");
 		}
-		if (left(aKey, aThis)) {
+		if (left(aKey, aThis->fMask)) {
 			return aThis->fLeft->at(aKey);
 		}
 		return aThis->fRight->at(aKey);
@@ -372,7 +382,7 @@ struct leaf : node<Key, T, Prefix, Mask>
 	using typename node_type::mapped_type;
 	using typename node_type::value_type;
 	using typename node_type::iterator;
-	typedef leaf<Key, T, Prefix, Mask> leaf_type;
+	using typename node_type::leaf_type;
 
 	template <typename OtherKey, typename U>
 	leaf(OtherKey&& key, U&& mapped)
@@ -426,14 +436,38 @@ private:
 	value_type fValue;
 };
 
+template <typename Mask, typename Prefix>
+Mask make_mask(Prefix prefix1, Prefix prefix2)
+{
+	using std::log2;
+	return 1 << static_cast<Mask>(log2(prefix1 ^ prefix2));
+}
+
+template <typename Prefix, typename Mask>
+Prefix make_prefix(Prefix prefix, Mask mask)
+{
+	return prefix & (~(mask - 1) ^ mask);
+}
+
 template <typename Key, typename T, typename Prefix, typename Mask>
 shared_ptr<branch<Key, T, Prefix, Mask>>
-make_branch(Prefix prefix1,
+make_branch(Prefix const& prefix1,
 						shared_ptr<node<Key, T, Prefix, Mask>> node1,
-						Prefix prefix2,
+						Prefix const& prefix2,
 						shared_ptr<node<Key, T, Prefix, Mask>> node2)
 {
-	return make_shared<branch<Key, T, Prefix, Mask>>(prefix1, prefix2, std::move(node1), std::move(node2));
+	auto mask = make_mask<Mask>(prefix1, prefix2);
+	auto prefix = make_prefix(prefix1, mask);
+	if (left(prefix1, mask)) {
+		return make_shared<branch<Key, T, Prefix, Mask>>(prefix,
+																										 mask,
+																										 std::move(node1),
+																										 std::move(node2));
+	}
+	return make_shared<branch<Key, T, Prefix, Mask>>(prefix,
+																									 mask,
+																									 std::move(node2),
+																									 std::move(node1));
 }
 
 template <
@@ -446,7 +480,8 @@ struct shared_scalar_map
 {
 private:
 	typedef node<Key, T, Prefix, Mask> node_type;
-	typedef leaf<Key, T, Prefix, Mask> leaf_type;
+	typedef typename node_type::branch_type branch_type;
+	typedef typename node_type::leaf_type leaf_type;
 
 public:
 	typedef typename node_type::key_type key_type;
