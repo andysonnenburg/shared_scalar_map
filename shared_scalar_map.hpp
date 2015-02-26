@@ -19,15 +19,61 @@ namespace EML
     namespace shared_scalar_map_detail
     {
 #if defined(_WIN32)
-        inline unsigned long log2(unsigned long arg)
+
+        template <typename T>
+        typename std::enable<
+            sizeof(T) <= sizeof(unsigned long),
+            unsigned long
+            >::type log2(T arg)
         {
             unsigned long result;
             _BitScanReverse(&result, arg);
             return result;
         }
-#elif defined(__GNUG__)
 
-#else
+#if defined(_WIN64)
+
+        template <typename T>
+        typename std::enable<
+            sizeof(unsigned long) < sizeof(T) && sizeof(T) <= sizeof(__int64),
+            unsigned long
+            >::type log2(T arg)
+        {
+            unsigned long result;
+            _BitScanReverse64(&result, arg);
+            return result;
+        }
+
+#endif
+
+#elif defined(__GNUC__)
+
+        template <typename T>
+        typename std::enable_if<
+            sizeof(T) <= sizeof(unsigned int),
+            int
+            >::type log2(T arg)
+        {
+          return sizeof(arg) * 8 - __builtin_clz(arg) - 1;
+        }
+
+        template <typename T>
+        typename std::enable_if<
+            sizeof(unsigned int) < sizeof(T) && sizeof(T) <= sizeof(unsigned long),
+            int
+            >::type log2(T arg)
+        {
+          return sizeof(arg) * 8 - __builtin_clzl(arg) - 1;
+        }
+
+        template <typename T>
+        typename std::enable_if<
+            sizeof(unsigned long) < sizeof(T) && sizeof(T) <= sizeof(unsigned long long),
+            int
+            >::type log2(T arg)
+        {
+          return sizeof(arg) * 8 - __builtin_clzll(arg) - 1;
+        }
 
 #endif
 
@@ -782,7 +828,7 @@ namespace EML
                 if (aThis->fNode) {
                     return aThis->fNode->find(aKey);
                 }
-                return find_result<This>::type();
+                return typename find_result<This>::type();
             }
 
             shared_ptr<node_type> fNode;
