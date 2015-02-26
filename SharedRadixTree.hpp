@@ -19,7 +19,7 @@
 
 namespace EML
 {
-    namespace shared_scalar_map_detail
+    namespace shared_radix_tree_detail
     {
 #if defined(_WIN32)
 
@@ -81,15 +81,15 @@ namespace EML
 #endif
 
         template <typename>
-        struct pointer_is_const;
+        struct is_pointer_to_const;
 
         template <typename T>
-        struct pointer_is_const<T const*>
+        struct is_pointer_to_const<T const*>
             : std::true_type
         {};
 
         template <typename T>
-        struct pointer_is_const<T*>
+        struct is_pointer_to_const<T*>
             : std::false_type
         {};
 
@@ -102,37 +102,25 @@ namespace EML
             typedef T type;
         };
 
-        /// Dummy type to disambiguate `shared_ptr` initial construction
-        /// from copy and move construction.
-        struct make_arg_t
-        {};
-
-        namespace
-        {
-            /// Dummy argument to disambiguate `shared_ptr` initial
-            /// construction from copy and move construction.
-            make_arg_t make_arg = {};
-        }
-
         /// A reference counting pointer.  The advantage of this over
         /// `std::shared_ptr` is both time and space.  Bumping a
         /// `std::shared_ptr` use count requires a `virtual` function call.
-        /// Bumping a `shared_ptr` use count is performed via a direct call.  A
-        /// `std::shared_ptr` requires two words of space.  `shared_ptr` only
-        /// requires one.  These advantages are at the cost of usability.
-        /// `shared_ptr` requires any `T` to be a subclass of `control_block`.
-        /// Additionally, `shared_ptr` cannot adopt any particular pointer - it
-        /// must create the pointer itself via `make_shared`.
+        /// Bumping an `intrusive_shared_ptr` use count is performed via a
+        /// direct call.  A `std::shared_ptr` requires two words of space.
+        /// `intrusive_shared_ptr` only requires one.  These advantages are at
+        /// the cost of usability.  `intrusive_shared_ptr` requires any `T` to
+        /// be a subclass of `control_block`.
         template <typename>
-        struct shared_ptr;
+        struct intrusive_shared_ptr;
 
-        /// Control block for `shared_ptr` containing a use count.  Only
-        /// `shared_ptr` may modify the use count.  To be able to be used with
-        /// `shared_ptr`, a type must subclass `control_block`.
+        /// Control block for `intrusive_shared_ptr` containing a use count.
+        /// Only `intrusive_shared_ptr` may modify the use count.  To be able
+        /// to be used with `intrusive_shared_ptr`, a type must subclass
+        /// `control_block`.
         struct control_block
         {
             template <typename>
-            friend struct shared_ptr;
+            friend struct intrusive_shared_ptr;
 
             control_block()
                 : fUseCount(1)
@@ -158,33 +146,25 @@ namespace EML
         };
 
         template <typename T>
-        struct shared_ptr
+        struct intrusive_shared_ptr
         {
             template <typename>
-            friend struct shared_ptr;
+            friend struct intrusive_shared_ptr;
 
-            shared_ptr()
+            intrusive_shared_ptr()
                 : fPtr(nullptr)
             {}
 
-            template <typename Arg0, typename Arg1>
-            shared_ptr(make_arg_t, Arg0&& arg0, Arg1&& arg1)
-                : fPtr(new T(std::forward<Arg0>(arg0), std::forward<Arg1>(arg1)))
+            template <typename U>
+            intrusive_shared_ptr(U* ptr)
+                : fPtr(ptr)
             {}
 
-            template <typename Arg0, typename Arg1, typename Arg2, typename Arg3>
-            shared_ptr(make_arg_t, Arg0&& arg0, Arg1&& arg1, Arg2&& arg2, Arg3&& arg3)
-                : fPtr(new T(std::forward<Arg0>(arg0),
-                             std::forward<Arg1>(arg1),
-                             std::forward<Arg2>(arg2),
-                             std::forward<Arg3>(arg3)))
-            {}
-
-            shared_ptr(std::nullptr_t)
+            intrusive_shared_ptr(std::nullptr_t)
                 : fPtr(nullptr)
             {}
 
-            shared_ptr(shared_ptr const& rhs)
+            intrusive_shared_ptr(intrusive_shared_ptr const& rhs)
                 : fPtr(rhs.fPtr)
             {
                 if (auto block = get_control_block()) {
@@ -193,7 +173,7 @@ namespace EML
             }
 
             template <typename U>
-            shared_ptr(shared_ptr<U> const& rhs)
+            intrusive_shared_ptr(intrusive_shared_ptr<U> const& rhs)
                 : fPtr(rhs.fPtr)
             {
                 if (auto block = get_control_block()) {
@@ -201,26 +181,26 @@ namespace EML
                 }
             }
 
-            shared_ptr(shared_ptr&& rhs)
+            intrusive_shared_ptr(intrusive_shared_ptr&& rhs)
                 : fPtr(rhs.fPtr)
             {
                 rhs.fPtr = nullptr;
             }
 
             template <typename U>
-            shared_ptr(shared_ptr<U>&& rhs)
+            intrusive_shared_ptr(intrusive_shared_ptr<U>&& rhs)
                 : fPtr(rhs.fPtr)
             {
                 rhs.fPtr = nullptr;
             }
 
-            shared_ptr& operator=(shared_ptr rhs)
+            intrusive_shared_ptr& operator=(intrusive_shared_ptr rhs)
             {
                 swap(rhs);
                 return *this;
             }
 
-            ~shared_ptr()
+            ~intrusive_shared_ptr()
             {
                 if (auto block = get_control_block()) {
                     if (block->unique()) {
@@ -241,12 +221,12 @@ namespace EML
                 return fPtr;
             }
 
-            friend bool operator==(shared_ptr const& lhs, shared_ptr const& rhs)
+            friend bool operator==(intrusive_shared_ptr const& lhs, intrusive_shared_ptr const& rhs)
             {
                 return lhs.fPtr == rhs.fPtr;
             }
 
-            friend bool operator!=(shared_ptr const& lhs, shared_ptr const& rhs)
+            friend bool operator!=(intrusive_shared_ptr const& lhs, intrusive_shared_ptr const& rhs)
             {
                 return lhs.fPtr != rhs.fPtr;
             }
@@ -258,10 +238,18 @@ namespace EML
                 return fPtr;
             }
 
-            void swap(shared_ptr& rhs)
+            void swap(intrusive_shared_ptr& rhs)
             {
                 using std::swap;
                 swap(fPtr, rhs.fPtr);
+            }
+
+            bool unique() const
+            {
+                if (auto block = get_control_block()) {
+                    return block->unique();
+                }
+                return true;
             }
 
           private:
@@ -274,7 +262,7 @@ namespace EML
         };
 
         template <typename T>
-        void swap(shared_ptr<T>& lhs, shared_ptr<T>& rhs)
+        void swap(intrusive_shared_ptr<T>& lhs, intrusive_shared_ptr<T>& rhs)
         {
             lhs.swap(rhs);
         }
@@ -284,11 +272,10 @@ namespace EML
             typename Arg0,
             typename Arg1
             >
-        shared_ptr<T> make_shared(Arg0&& arg0, Arg1&& arg1)
+        intrusive_shared_ptr<T> make_shared(Arg0&& arg0, Arg1&& arg1)
         {
-            return shared_ptr<T>(make_arg,
-                                 std::forward<Arg0>(arg0),
-                                 std::forward<Arg1>(arg1));
+            return intrusive_shared_ptr<T>(new T(std::forward<Arg0>(arg0),
+                                                 std::forward<Arg1>(arg1)));
         }
 
         template <
@@ -298,13 +285,12 @@ namespace EML
             typename Arg2,
             typename Arg3
             >
-        shared_ptr<T> make_shared(Arg0&& arg0, Arg1&& arg1, Arg2&& arg2, Arg3&& arg3)
+        intrusive_shared_ptr<T> make_shared(Arg0&& arg0, Arg1&& arg1, Arg2&& arg2, Arg3&& arg3)
         {
-            return shared_ptr<T>(make_arg,
-                                 std::forward<Arg0>(arg0),
-                                 std::forward<Arg1>(arg1),
-                                 std::forward<Arg2>(arg2),
-                                 std::forward<Arg3>(arg3));
+            return intrusive_shared_ptr<T>(new T(std::forward<Arg0>(arg0),
+                                                 std::forward<Arg1>(arg1),
+                                                 std::forward<Arg2>(arg2),
+                                                 std::forward<Arg3>(arg3)));
         }
 
         template <typename ValueType>
@@ -397,14 +383,14 @@ namespace EML
             return prefix & (~(mask - static_cast<Mask>(1)) ^ mask);
         }
 
-        /// Construct a `shared_ptr` to a `branch` from two prefixes and two
-        /// nodes.  This function determines which node should be the left node
-        /// and which node should be the right node.
+        /// Construct a `intrusive_shared_ptr` to a `branch` from two prefixes
+        /// and two nodes.  This function determines which node should be the
+        /// left node and which node should be the right node.
         template <typename Prefix, typename Mask, typename Key, typename T>
-        shared_ptr<branch<Key, T, Prefix, Mask>> make_branch(Prefix const& prefix1,
-                                                             shared_ptr<node<Key, T, Prefix, Mask>> node1,
-                                                             Prefix const& prefix2,
-                                                             shared_ptr<node<Key, T, Prefix, Mask>> node2)
+        intrusive_shared_ptr<branch<Key, T, Prefix, Mask>> make_branch(Prefix const& prefix1,
+                                                                       intrusive_shared_ptr<node<Key, T, Prefix, Mask>> node1,
+                                                                       Prefix const& prefix2,
+                                                                       intrusive_shared_ptr<node<Key, T, Prefix, Mask>> node2)
         {
             auto mask = make_mask<Mask>(prefix1, prefix2);
             auto prefix = make_prefix(prefix1, mask);
@@ -422,7 +408,7 @@ namespace EML
 
         template <typename This>
         struct find_result
-            : std::conditional<pointer_is_const<This>::value,
+            : std::conditional<is_pointer_to_const<This>::value,
                                typename remove_pointer<This>::type::const_iterator,
                                typename remove_pointer<This>::type::iterator>
         {};
@@ -441,21 +427,37 @@ namespace EML
             typedef Key key_type;
             typedef T mapped_type;
             typedef std::pair<key_type const, mapped_type> value_type;
-            typedef shared_scalar_map_detail::iterator<value_type> iterator;
-            typedef shared_scalar_map_detail::iterator<value_type const> const_iterator;
+            typedef shared_radix_tree_detail::iterator<value_type> iterator;
+            typedef shared_radix_tree_detail::iterator<value_type const> const_iterator;
+            typedef int size_type;
 
             virtual ~node() {}
 
-            /// Insert a value under this node.  This node's `shared_ptr`
-            /// should be passed as an additional argument.  The result is a
-            /// `std::tuple` containing a `shared_ptr` that should replace this
-            /// node, an `iterator` pointing to the found or inserted value,
-            /// and a `bool` indicating if an insertion occurred.
-            virtual std::tuple<shared_ptr<node>, iterator, bool> insert(shared_ptr<node> const&, value_type const&) = 0;
+            /// Insert a value under this node.  This node's
+            /// `intrusive_shared_ptr` should be passed as an additional
+            /// argument.  The result is a `std::tuple` containing a
+            /// `intrusive_shared_ptr` that should replace this node, an
+            /// `iterator` pointing to the found or inserted value, and a
+            /// `bool` indicating if an insertion occurred.  The path up to but
+            /// not necessarily including this node's `intrusive_shared_ptr` is
+            /// required to be unique, possibly allowing for destructive
+            /// update.
+            /// @see insert_shared
+            virtual std::tuple<intrusive_shared_ptr<node>, iterator, bool> insert_unique(intrusive_shared_ptr<node> const&, value_type const&) = 0;
+
+            /// Similar to `insert_unique`, except the path up to this node is
+            /// known to not be unique.  Therefore, destructive updates may not
+            /// be used.
+            /// @see insert_unique
+            virtual std::tuple<intrusive_shared_ptr<node>, iterator, bool> insert_shared(intrusive_shared_ptr<node> const&, value_type const&) = 0;
 
             virtual iterator find(Key const&) = 0;
 
             virtual const_iterator find(Key const&) const = 0;
+
+            virtual std::tuple<intrusive_shared_ptr<node>, size_type> erase_unique(intrusive_shared_ptr<node_type> const&, key_type const&) = 0;
+
+            virtual std::tuple<intrusive_shared_ptr<node>, size_type> erase_shared(intrusive_shared_ptr<node_type> const&, key_type const&) = 0;
         };
 
         template <
@@ -474,6 +476,7 @@ namespace EML
             using typename node_type::value_type;
             using typename node_type::iterator;
             using typename node_type::const_iterator;
+            using typename node_type::size_type;
 
             template <
                 typename OtherPrefix,
@@ -488,15 +491,26 @@ namespace EML
                 , fRight(std::forward<OtherRight>(right))
             {}
 
-            std::tuple<shared_ptr<node_type>, iterator, bool> insert(shared_ptr<node_type> const& ptr, value_type const& value)
+            std::tuple<intrusive_shared_ptr<node_type>, iterator, bool> insert_unique(intrusive_shared_ptr<node_type> const& ptr, value_type const& value) override final
             {
                 if (not_mem(value.first, fPrefix, fMask)) {
                     return insert_not_mem(ptr, value);
                 }
                 if (left(static_cast<Prefix>(value.first), fMask)) {
-                    return insert_left(value);
+                    return insert_left(ptr, value);
                 }
-                return insert_right(value);
+                return insert_right(ptr, value);
+            }
+
+            std::tuple<intrusive_shared_ptr<node_type>, iterator, bool> insert_shared(intrusive_shared_ptr<node_type> const& ptr, value_type const& value) override final
+            {
+                if (not_mem(value.first, fPrefix, fMask)) {
+                    return insert_not_mem(ptr, value);
+                }
+                if (left(static_cast<Prefix>(value.first), fMask)) {
+                    return insert_left_shared(value);
+                }
+                return insert_right_shared(value);
             }
 
             iterator find(key_type const& key) override final
@@ -509,44 +523,182 @@ namespace EML
                 return find_impl(this, key);
             }
 
+            std::tuple<intrusive_shared_ptr<node_type>, size_type> erase_unique(intrusive_shared_ptr<node_type> const& ptr, key_type const& key) override final
+            {
+                if (not_mem(key, fPrefix, fMask)) {
+                    return erase_not_mem(ptr);
+                }
+                if (left(static_cast<Prefix>(key), fMask)) {
+                    return erase_left(ptr, key);
+                }
+                return erase_right(ptr, key);
+            }
+
+            std::tuple<intrusive_shared_ptr<node_type>, size_type> erase_shared(intrusive_shared_ptr<node_type> const& ptr, key_type const& key) override final
+            {
+                if (not_mem(key, fPrefix, fMask)) {
+                    return erase_not_mem(ptr);
+                }
+                if (left(static_cast<Prefix>(key), fMask)) {
+                    return erase_left_shared(key);
+                }
+                return erase_right_shared(key);
+            }
+
           private:
             /// Insert `value` by constructing a new `branch` node and setting
             /// `this` node and a new `leaf` containing `value` under it.
-            std::tuple<shared_ptr<node_type>, iterator, bool>
-            insert_not_mem(shared_ptr<node_type> ptr, value_type const& value)
+            std::tuple<intrusive_shared_ptr<node_type>, iterator, bool>
+            insert_not_mem(intrusive_shared_ptr<node_type> ptr, value_type const& value) const
             {
                 auto leaf = make_shared<leaf_type>(value.first, value.second);
                 iterator i(&leaf->get());
-                auto branch = make_branch(static_cast<Prefix>(value.first), shared_ptr<node_type>(std::move(leaf)), fPrefix, std::move(ptr));
+                auto branch = make_branch(static_cast<Prefix>(value.first), intrusive_shared_ptr<node_type>(std::move(leaf)), fPrefix, std::move(ptr));
                 return std::make_tuple(std::move(branch), i, true);
             }
 
-            /// Insert `value` by inserting `value` in `fLeft`.  Construct a
-            /// `branch` node containing the updated left node with the other
-            /// data coming from `this` node.
-            std::tuple<shared_ptr<node_type>, iterator, bool>
-            insert_left(value_type const& value)
+            /// Insert `value` by inserting `value` in `fLeft`, destructively
+            /// if `this` `ptr` is `unique`, non-destructively otherwise.
+            std::tuple<intrusive_shared_ptr<node_type>, iterator, bool>
+            insert_left(intrusive_shared_ptr<node_type> const& ptr, value_type const& value)
             {
-                shared_ptr<node_type> left;
+                if (ptr.unique()) {
+                    return insert_left_unique(ptr, value);
+                }
+                return insert_left_shared(value);
+            }
+
+            /// Insert `value` by inserting `value` in `fLeft` destructively.
+            std::tuple<intrusive_shared_ptr<node_type>, iterator, bool>
+            insert_left_unique(intrusive_shared_ptr<node_type> ptr, value_type const& value)
+            {
                 iterator i;
                 bool inserted;
-                std::tie(left, i, inserted) = fLeft->insert(fLeft, value);
+                std::tie(fLeft, i, inserted) = fLeft->insert_unique(fLeft, value);
+                return std::make_tuple(std::move(ptr), i, inserted);
+            }
+
+            /// Insert `value` by inserting `value` in `fLeft` non-
+            /// destructively.
+            std::tuple<intrusive_shared_ptr<node_type>, iterator, bool>
+            insert_left_shared(value_type const& value) const
+            {
+                intrusive_shared_ptr<node_type> left;
+                iterator i;
+                bool inserted;
+                std::tie(left, i, inserted) = fLeft->insert_shared(fLeft, value);
                 auto branch = make_shared<branch_type>(fPrefix, fMask, std::move(left), fRight);
                 return std::make_tuple(std::move(branch), i, inserted);
             }
 
-            /// Insert `value` by inserting `value` in `fRight`.  Construct a
-            /// `branch` node containing the updated right node with the other
-            /// data coming from `this` node.
-            std::tuple<shared_ptr<node_type>, iterator, bool>
-            insert_right(value_type const& value)
+            /// Insert `value` by inserting `value` in `fRight`, destructively
+            /// if `this` `ptr` is `unique`, non-destructively otherwise.
+            std::tuple<intrusive_shared_ptr<node_type>, iterator, bool>
+            insert_right(intrusive_shared_ptr<node_type> const& ptr, value_type const& value)
             {
-                shared_ptr<node_type> right;
+                if (ptr.unique()) {
+                    return insert_right_unique(ptr, value);
+                }
+                return insert_right_shared(value);
+            }
+
+            /// Insert `value` by inserting `value` in `fRight` destructively.
+            std::tuple<intrusive_shared_ptr<node_type>, iterator, bool>
+            insert_right_unique(intrusive_shared_ptr<node_type> ptr, value_type const& value)
+            {
                 iterator i;
                 bool inserted;
-                std::tie(right, i, inserted) = fRight->insert(fRight, value);
+                std::tie(fRight, i, inserted) = fRight->insert_unique(fRight, value);
+                return std::make_tuple(std::move(ptr), i, inserted);
+            }
+
+            /// Insert `value` by inserting `value` in `fRight` non-
+            /// destructively.
+            std::tuple<intrusive_shared_ptr<node_type>, iterator, bool>
+            insert_right_shared(value_type const& value) const
+            {
+                intrusive_shared_ptr<node_type> right;
+                iterator i;
+                bool inserted;
+                std::tie(right, i, inserted) = fRight->insert_shared(fRight, value);
                 auto branch = make_shared<branch_type>(fPrefix, fMask, fLeft, std::move(right));
                 return std::make_tuple(std::move(branch), i, inserted);
+            }
+
+            std::tuple<intrusive_shared_ptr<node_type>, size_type>
+            erase_not_mem(intrusive_shared_ptr<node_type> ptr)
+            {
+                return std::make_tuple(std::move(ptr), 0);
+            }
+
+            std::tuple<intrusive_shared_ptr<node_type>, size_type>
+            erase_left(intrusive_shared_ptr<node_type> const& ptr, key_type const& key)
+            {
+                if (ptr.unique()) {
+                    return erase_left_unique(ptr, key);
+                }
+                return erase_left_shared(key);
+            }
+
+            std::tuple<intrusive_shared_ptr<node_type>, size_type>
+            erase_left_unique(intrusive_shared_ptr<node_type> const& ptr, key_type const& key)
+            {
+                intrusive_shared_ptr<node_type> left;
+                size_type result;
+                std::tie(left, result) = fLeft->erase_unique(fLeft, key);
+                if (left) {
+                    fLeft = std::move(left);
+                    return std::make_tuple(ptr, result);
+                }
+                return std::make_tuple(fRight, result);
+            }
+
+            std::tuple<intrusive_shared_ptr<node_type>, size_type>
+            erase_left_shared(key_type const& key)
+            {
+                intrusive_shared_ptr<node_type> left;
+                size_type result;
+                std::tie(left, result) = fLeft->erase_shared(fLeft, key);
+                if (left) {
+                    auto branch = make_shared<branch_type>(fPrefix, fMask, std::move(left), fRight);
+                    return std::make_tuple(std::move(branch), result);
+                }
+                return std::make_tuple(fRight, result);
+            }
+
+            std::tuple<intrusive_shared_ptr<node_type>, size_type>
+            erase_right(intrusive_shared_ptr<node_type> const& ptr, key_type const& key)
+            {
+                if (ptr.unique()) {
+                    return erase_right_unique(ptr, key);
+                }
+                return erase_right_shared(key);
+            }
+
+            std::tuple<intrusive_shared_ptr<node_type>, size_type>
+            erase_right_unique(intrusive_shared_ptr<node_type> const& ptr, key_type const& key)
+            {
+                intrusive_shared_ptr<node_type> right;
+                size_type result;
+                std::tie(right, result) = fRight->erase_unique(fRight, key);
+                if (right) {
+                    fRight = std::move(right);
+                    return std::make_tuple(ptr, result);
+                }
+                return std::make_tuple(fLeft, result);
+            }
+
+            std::tuple<intrusive_shared_ptr<node_type>, size_type>
+            erase_right_shared(key_type const& key)
+            {
+                intrusive_shared_ptr<node_type> right;
+                size_type result;
+                std::tie(right, result) = fRight->erase_shared(fRight, key);
+                if (right) {
+                    auto branch = make_shared<branch_type>(fPrefix, fMask, fLeft, std::move(right));
+                    return std::make_tuple(std::move(branch), result);
+                }
+                return std::make_tuple(fLeft, result);
             }
 
             /// Implementation of both `const` and non-`const` `find`.
@@ -569,8 +721,8 @@ namespace EML
             /// may be contained in `fLeft`.  Otherwise, it may be contained
             /// in `fRight`.
             Mask fMask;
-            shared_ptr<node<key_type, mapped_type, Prefix, Mask>> fLeft;
-            shared_ptr<node<key_type, mapped_type, Prefix, Mask>> fRight;
+            intrusive_shared_ptr<node<key_type, mapped_type, Prefix, Mask>> fLeft;
+            intrusive_shared_ptr<node<key_type, mapped_type, Prefix, Mask>> fRight;
         };
 
         template <
@@ -588,20 +740,26 @@ namespace EML
             using typename node_type::value_type;
             using typename node_type::iterator;
             using typename node_type::const_iterator;
+            using typename node_type::size_type;
 
             template <typename OtherKey, typename U>
             leaf(OtherKey&& key, U&& mapped)
                 : fValue(std::forward<OtherKey>(key), std::forward<U>(mapped))
             {}
 
-            std::tuple<shared_ptr<node_type>, iterator, bool> insert(shared_ptr<node_type> const& ptr, value_type const& value)
+            std::tuple<intrusive_shared_ptr<node_type>, iterator, bool> insert_unique(intrusive_shared_ptr<node_type> const& ptr, value_type const& value) override final
+            {
+                return insert_shared(ptr, value);
+            }
+
+            std::tuple<intrusive_shared_ptr<node_type>, iterator, bool> insert_shared(intrusive_shared_ptr<node_type> const& ptr, value_type const& value) override final
             {
                 if (value.first == fValue.first) {
                     return std::make_tuple(ptr, iterator(&fValue), false);
                 }
                 auto leaf = make_shared<leaf_type>(value.first, value.second);
                 iterator i(&leaf->get());
-                auto branch = make_branch<Prefix>(value.first, shared_ptr<node_type>(std::move(leaf)), fValue.first, ptr);
+                auto branch = make_branch<Prefix>(value.first, intrusive_shared_ptr<node_type>(std::move(leaf)), fValue.first, ptr);
                 return std::make_tuple(std::move(branch), i, true);
             }
 
@@ -613,6 +771,19 @@ namespace EML
             const_iterator find(key_type const& key) const override final
             {
                 return find_impl(this, key);
+            }
+
+            std::tuple<intrusive_shared_ptr<node_type>, size_type> erase_unique(intrusive_shared_ptr<node_type> const& ptr, key_type const& key) override final
+            {
+                return erase_shared(ptr, key);
+            }
+
+            std::tuple<intrusive_shared_ptr<node_type>, size_type> erase_shared(intrusive_shared_ptr<node_type> const& ptr, key_type const& key) override final
+            {
+                if (key == fValue.first) {
+                    return std::make_tuple(intrusive_shared_ptr<node_type>(), 1);
+                }
+                return std::make_tuple(ptr, 0);
             }
 
             value_type& get()
@@ -693,11 +864,6 @@ namespace EML
             friend ptr_prefix operator&(ptr_prefix, ptr_mask);
 
             template <typename T>
-            ptr_mask(T* ptr)
-                : fValue(reinterpret_cast<std::uintptr_t>(ptr))
-            {}
-
-            template <typename T>
             explicit ptr_mask(T value)
                 : fValue(static_cast<std::uintptr_t>(value))
             {}
@@ -750,7 +916,7 @@ namespace EML
                 ptr_mask,
                 Key>::type
             >
-        struct shared_scalar_map
+        struct SharedRadixTree
         {
           private:
             typedef node<Key, T, Prefix, Mask> node_type;
@@ -763,9 +929,9 @@ namespace EML
             typedef typename node_type::value_type value_type;
             typedef typename node_type::iterator iterator;
             typedef typename node_type::const_iterator const_iterator;
+            typedef typename node_type::size_type size_type;
 
-          public:
-            shared_scalar_map()
+            SharedRadixTree()
             {}
 
             /// `O(min(log(n), sizeof(Key)))`
@@ -773,7 +939,7 @@ namespace EML
             {
                 if (fNode) {
                     std::pair<iterator, bool> result;
-                    std::tie(fNode, result.first, result.second) = fNode->insert(fNode, value);
+                    std::tie(fNode, result.first, result.second) = fNode->insert_unique(fNode, value);
                     return result;
                 }
                 auto leaf = make_shared<leaf_type>(value.first, value.second);
@@ -792,6 +958,17 @@ namespace EML
             const_iterator find(key_type const& key) const
             {
                 return find_impl(this, key);
+            }
+
+            /// `O(min(log(n), sizeof(Key)))`
+            size_type erase(key_type const& key)
+            {
+                if (fNode) {
+                    size_type result;
+                    std::tie(fNode, result) = fNode->erase_unique(fNode, key);
+                    return result;
+                }
+                return 0;
             }
 
             /// `O(1)`
@@ -834,7 +1011,7 @@ namespace EML
                 return typename find_result<This>::type();
             }
 
-            shared_ptr<node_type> fNode;
+            intrusive_shared_ptr<node_type> fNode;
         };
     }
 
@@ -842,7 +1019,7 @@ namespace EML
     /// compression.  Insertion, lookup, and deletion are all nearly linear
     /// time, while copying is constant time.  The methods of this class follow
     /// the `AssociativeContainer` concept where possible.
-    using shared_scalar_map_detail::shared_scalar_map;
+    using shared_radix_tree_detail::SharedRadixTree;
 }
 
 #endif

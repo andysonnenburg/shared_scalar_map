@@ -1,10 +1,10 @@
-#include "shared_scalar_map.hpp"
+#include "SharedRadixTree.hpp"
 
 #include <iostream>
 
 int main()
 {
-	EML::shared_scalar_map<int, int> map;
+	EML::SharedRadixTree<int, int> map;
 	std::cout << map.empty() << std::endl;
 	map.insert(std::make_pair(0, 0));
 	std::cout << map.find(0)->second << std::endl;
