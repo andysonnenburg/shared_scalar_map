@@ -12,6 +12,9 @@
 #ifdef _WIN32
 #include <intrin.h>
 #pragma intrinsic(_BitScanReverse)
+#ifdef _WIN64
+#pragma intrinsic(_BitScanReverse64)
+#endif
 #endif
 
 namespace EML
@@ -21,7 +24,7 @@ namespace EML
 #if defined(_WIN32)
 
         template <typename T>
-        typename std::enable<
+        typename std::enable_if<
             sizeof(T) <= sizeof(unsigned long),
             unsigned long
             >::type log2(T arg)
@@ -34,7 +37,7 @@ namespace EML
 #if defined(_WIN64)
 
         template <typename T>
-        typename std::enable<
+        typename std::enable_if<
             sizeof(unsigned long) < sizeof(T) && sizeof(T) <= sizeof(__int64),
             unsigned long
             >::type log2(T arg)
@@ -54,7 +57,7 @@ namespace EML
             int
             >::type log2(T arg)
         {
-          return sizeof(arg) * 8 - __builtin_clz(arg) - 1;
+          return sizeof(arg) * 8 - 1 - __builtin_clz(arg);
         }
 
         template <typename T>
@@ -63,7 +66,7 @@ namespace EML
             int
             >::type log2(T arg)
         {
-          return sizeof(arg) * 8 - __builtin_clzl(arg) - 1;
+          return sizeof(arg) * 8 - 1 - __builtin_clzl(arg);
         }
 
         template <typename T>
@@ -72,7 +75,7 @@ namespace EML
             int
             >::type log2(T arg)
         {
-          return sizeof(arg) * 8 - __builtin_clzll(arg) - 1;
+          return sizeof(arg) * 8 - 1 - __builtin_clzll(arg);
         }
 
 #endif
