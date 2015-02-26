@@ -1016,7 +1016,7 @@ namespace EML
     }
 
     /// Map from `Key` to `T` implemented as a radix tree with path
-    /// compression.  Insertion, lookup, and deletion are all nearly linear
+    /// compression.  Insertion, lookup, and deletion are all nearly constant
     /// time, while copying is constant time.  The methods of this class follow
     /// the `AssociativeContainer` concept where possible.
     using shared_radix_tree_detail::SharedRadixTree;
