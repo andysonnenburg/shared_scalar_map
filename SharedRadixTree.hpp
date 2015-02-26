@@ -1,6 +1,6 @@
 // Copyright 2015 The MathWorks, Inc.
-#ifndef _eml_general_shared_scalar_map_hpp
-#define _eml_general_shared_scalar_map_hpp
+#ifndef _eml_general_SharedRadixTree_hpp
+#define _eml_general_SharedRadixTree_hpp
 
 #include <tuple>
 #include <type_traits>
